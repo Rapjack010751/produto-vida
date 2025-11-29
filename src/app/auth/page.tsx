@@ -1,15 +1,22 @@
 'use client'
 
 import { useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Sparkles, Heart, Target } from 'lucide-react'
+import { Sparkles, Heart, Target, AlertCircle } from 'lucide-react'
+import { User } from '@/lib/types'
+import { toast } from 'sonner'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 
-export default function AuthPage() {
+interface AuthPageProps {
+  onLogin: (user: User) => void
+}
+
+export default function AuthPage({ onLogin }: AuthPageProps) {
   const [loading, setLoading] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -17,50 +24,98 @@ export default function AuthPage() {
   const [birthDate, setBirthDate] = useState('')
 
   async function handleSignUp() {
+    setLoading(true)
+    
     try {
-      setLoading(true)
-      const { data, error } = await supabase.auth.signUp({
+      if (!isSupabaseConfigured) {
+        // Local fallback mode
+        const mockUser: User = {
+          id: crypto.randomUUID(),
+          email,
+          full_name: fullName,
+          birth_date: birthDate,
+          created_at: new Date().toISOString(),
+        }
+        
+        toast.success('Conta criada com sucesso! (Modo local)')
+        onLogin(mockUser)
+        return
+      }
+
+      // Create auth user
+      const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
       })
 
-      if (error) throw error
+      if (authError) throw authError
 
-      if (data.user) {
+      if (authData.user) {
         // Create user profile
-        const { error: profileError } = await supabase
+        const { data: userData, error: userError } = await supabase
           .from('users')
-          .insert([
-            {
-              id: data.user.id,
-              email,
-              full_name: fullName,
-              birth_date: birthDate,
-            },
-          ])
+          .insert({
+            id: authData.user.id,
+            email,
+            full_name: fullName,
+            birth_date: birthDate,
+          })
+          .select()
+          .single()
 
-        if (profileError) throw profileError
+        if (userError) throw userError
 
-        alert('Cadastro realizado! Verifique seu email para confirmar.')
+        toast.success('Conta criada com sucesso!')
+        onLogin(userData)
       }
     } catch (error: any) {
-      alert(error.message)
+      toast.error(error.message || 'Erro ao criar conta')
     } finally {
       setLoading(false)
     }
   }
 
   async function handleSignIn() {
+    setLoading(true)
+    
     try {
-      setLoading(true)
-      const { error } = await supabase.auth.signInWithPassword({
+      if (!isSupabaseConfigured) {
+        // Local fallback mode
+        const mockUser: User = {
+          id: crypto.randomUUID(),
+          email,
+          full_name: 'Usuário Demo',
+          birth_date: '1990-01-01',
+          created_at: new Date().toISOString(),
+        }
+        
+        toast.success('Login realizado com sucesso! (Modo local)')
+        onLogin(mockUser)
+        return
+      }
+
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email,
         password,
       })
 
-      if (error) throw error
+      if (authError) throw authError
+
+      if (authData.user) {
+        // Fetch user profile
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', authData.user.id)
+          .single()
+
+        if (userError) throw userError
+
+        toast.success('Login realizado com sucesso!')
+        onLogin(userData)
+      }
     } catch (error: any) {
-      alert(error.message)
+      toast.error(error.message || 'Erro ao fazer login')
     } finally {
       setLoading(false)
     }
@@ -78,6 +133,15 @@ export default function AuthPage() {
           </div>
           <p className="text-gray-600">Seu guia para uma vida plena e realizada</p>
         </div>
+
+        {!isSupabaseConfigured && (
+          <Alert className="mb-4 border-orange-200 bg-orange-50">
+            <AlertCircle className="h-4 w-4 text-orange-600" />
+            <AlertDescription className="text-orange-800 text-sm">
+              Modo local ativo. Configure o Supabase nas Integrações para persistência de dados.
+            </AlertDescription>
+          </Alert>
+        )}
 
         <Card className="shadow-2xl border-0">
           <CardHeader>
@@ -116,7 +180,7 @@ export default function AuthPage() {
                 </div>
                 <Button
                   onClick={handleSignIn}
-                  disabled={loading}
+                  disabled={loading || !email || !password}
                   className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
                 >
                   {loading ? 'Entrando...' : 'Entrar'}
@@ -164,7 +228,7 @@ export default function AuthPage() {
                 </div>
                 <Button
                   onClick={handleSignUp}
-                  disabled={loading}
+                  disabled={loading || !email || !password || !fullName || !birthDate}
                   className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
                 >
                   {loading ? 'Cadastrando...' : 'Criar Conta'}
